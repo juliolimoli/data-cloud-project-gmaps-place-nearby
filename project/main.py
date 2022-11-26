@@ -4,9 +4,10 @@ from botocore.exceptions import ClientError
 
 # get secret from secret manager service
 def get_secret():
-    
-    secret_name = "dev/GMapsAPI"
-    region_name = "sa-east-1"
+
+    #environment = event['env'] # get environment variable
+    secret_name ='%s/GMapsAPI' % environment
+    region_name = 'sa-east-1'
 
     # Create a Secrets Manager client
     session = boto3.session.Session()
