@@ -43,16 +43,16 @@ def get_secret():
 
 
 # function that retry and abort on attempts to do something
-def retry_abort(max_retries: int = 3):
-    for attempt in range(1, max_retries + 1):
-        if attempt <= max_retries:
-            pass # try again
-        else:
-            pass # abort
+def retry_abort(func, max_retries: int = 3, attempt: int = 1):
+    if attempt <= max_retries:
+        attempt += 1
+        func(attempt=attempt)
+    else:
+        pass # abort
 
 
 # function that queries in the RDS Database
-def query_db(query: str):
+def query_db(query: str, attempt: int = 1):
     """Function that queries in the RDS Database instance."""
 
     ENDPOINT = ""
@@ -88,9 +88,12 @@ def query_db(query: str):
         cur = conn.cursor()
         cur.execute(f"""{query}""")
         query_results = cur.fetchall()
-
     except Exception as e:
-        print("Database connection failed due to {}".format(e))      
+        print("Database connection failed due to {}".format(e))
+        retry_abort(func=query_db(query=query), attempt=attempt)
+    else:
+        return query_results
+
 
 # function that requests in the nearby search
 def nearby_search(
@@ -98,7 +101,7 @@ def nearby_search(
     lon: str,
     types: str = 'restaurant|bar|meal_delivery|meal_takeaway|cafe',
     radius: str = '400',
-    response_format: str = 'json'
+    response_format: str = 'json',
     ):
     """Function that makes the requests for the Maps API - Nearby Search. 
     
@@ -117,15 +120,15 @@ def nearby_search(
     """
     API_KEY = get_secret()
     endpoint = 'https://maps.googleapis.com/maps/api/place/nearbysearch/'
-    url = f"{endpoint}{response_format}?location={lat}%2c{lon}&radius={radius}\
-&type={types}&key={API_KEY}"
+    url_loc = f"{endpoint}{response_format}?location={lat}%2c{lon}&radius=\
+{radius}&type={types}&key={API_KEY}"
 
     # request the API
     payload={}
     headers = {}
 
     try:
-        response = req.request("GET", url, headers=headers, data=payload)
+        response = req.request("GET", url_loc, headers=headers, data=payload)
     except Exception as e:
         raise e
     else:
@@ -133,4 +136,8 @@ def nearby_search(
 
 # lambda_handler function
 def lambda_handler():
-    lat_lon = query_db(query="SELECT * FROM db.")
+    lat_lon = query_db(query="SELECT * FROM db.points_to_search LIMIT 1")
+    response = nearby_search(
+        lat=lat_lon['lat'],
+        lon=lat_lon['lon']
+        )
