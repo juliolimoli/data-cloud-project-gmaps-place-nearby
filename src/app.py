@@ -3,6 +3,7 @@ import requests as req
 import mysql.connector
 import boto3
 from botocore.exceptions import ClientError
+import os
 
 # get secret from secret manager service
 def get_secret():
@@ -14,21 +15,20 @@ def get_secret():
     String: Access key
     """
 
-    #environment = event['env'] # get environment variable
-    # should setup env variable
-    secret_name = f'{environment}/GMapsAPI'
-    region_name = 'sa-east-1'
+    ENVIRONMENT = os.environ['environment']    
+    SECRET_NAME = f'{ENVIRONMENT}/GMapsAPI'
+    REGION = "sa-east-1"
 
     # Create a Secrets Manager client
     session = boto3.session.Session()
     client = session.client(
-        service_name='secretsmanager',
-        region_name=region_name
+        service_name = 'secretsmanager',
+        region_name = REGION
     )
 
     try:
         get_secret_value_response = client.get_secret_value(
-            SecretId=secret_name
+            SecretId = SECRET_NAME
         )
     except ClientError as e:
         # For a list of exceptions thrown, see
@@ -37,9 +37,9 @@ def get_secret():
         raise e
 
     # Decrypts secret using the associated KMS key.
-    secret = get_secret_value_response['SecretString']
+    SECRET = get_secret_value_response['SecretString']
 
-    return secret
+    return SECRET
 
 
 # function that retry and abort on attempts to do something
@@ -51,20 +51,23 @@ def retry_abort(max_retries: int = 3):
             pass # abort
 
 
-# function that queries the locations in the RDS instance
-def query_lat_lon():
-    """Function that queries the locations in the RDS instance."""
+# function that queries in the RDS Database
+def query_db(query: str):
+    """Function that queries in the RDS Database instance."""
 
-    ENDPOINT=""
-    PORT=""
-    USER=""
-    REGION=""
-    DBNAME=""
+    ENDPOINT = ""
+    PORT = ""
+    USER = ""
+    REGION = "sa-east-1"
+    DBNAME = ""
     #os.environ['LIBMYSQL_ENABLE_CLEARTEXT_PLUGIN'] = '1'
 
     #gets the credentials from .aws/credentials
-    session = boto3.Session(profile_name='default')
-    client = session.client('rds')
+    session = boto3.session.Session()
+    client = session.client(
+        service_name = 'rds',
+        region_name = REGION
+    )
 
     token = client.generate_db_auth_token(
         DBHostname=ENDPOINT,
@@ -83,7 +86,7 @@ def query_lat_lon():
             ssl_ca='SSLCERTIFICATE'
             )
         cur = conn.cursor()
-        cur.execute("""SELECT """)
+        cur.execute(f"""{query}""")
         query_results = cur.fetchall()
 
     except Exception as e:
@@ -125,5 +128,9 @@ def nearby_search(
         response = req.request("GET", url, headers=headers, data=payload)
     except Exception as e:
         raise e
-    
-    return response
+    else:
+        return response
+
+# lambda_handler function
+def lambda_handler():
+    lat_lon = query_db(query="SELECT * FROM db.")
