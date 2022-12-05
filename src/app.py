@@ -4,6 +4,7 @@ import mysql.connector
 import boto3
 from botocore.exceptions import ClientError
 import os
+import time
 
 # get secret from secret manager service
 def get_secret():
@@ -43,12 +44,17 @@ def get_secret():
 
 
 # function that retry and abort on attempts to do something
-def retry_abort(func, max_retries: int = 3, attempt: int = 1):
-    if attempt <= max_retries:
-        attempt += 1
-        func(attempt=attempt)
-    else:
-        pass # abort
+#def retry_abort(
+#    func,
+#    params: dict,
+#    max_retries: int = 3,
+#    attempt: int = 1
+#    ):
+#    if attempt <= max_retries:
+#        attempt += 1
+#        func(attempt=attempt)
+#    else:
+#        pass # abort
 
 
 # function that queries in the RDS Database
@@ -90,7 +96,7 @@ def query_db(query: str, attempt: int = 1):
         query_results = cur.fetchall()
     except Exception as e:
         print("Database connection failed due to {}".format(e))
-        retry_abort(func=query_db(query=query), attempt=attempt)
+        #retry_abort(func=query_db(query=query), attempt=attempt)
     else:
         return query_results
 
@@ -102,6 +108,7 @@ def nearby_search(
     types: str = 'restaurant|bar|meal_delivery|meal_takeaway|cafe',
     radius: str = '400',
     response_format: str = 'json',
+    #attempt: int = 1
     ):
     """Function that makes the requests for the Maps API - Nearby Search. 
     
@@ -132,12 +139,20 @@ def nearby_search(
     except Exception as e:
         raise e
     else:
+        # return OK
+        #if response.status_code != 200:
+            #retry_abort(func=lambda_handler())
         return response
 
 # lambda_handler function
-def lambda_handler():
+def lambda_handler(attempt):
     lat_lon = query_db(query="SELECT * FROM db.points_to_search LIMIT 1")
     response = nearby_search(
         lat=lat_lon['lat'],
         lon=lat_lon['lon']
         )
+
+    # pagination handler
+
+
+lambda_handler()
