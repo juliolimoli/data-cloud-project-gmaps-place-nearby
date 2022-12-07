@@ -5,6 +5,24 @@ import boto3
 from botocore.exceptions import ClientError
 import os
 import time
+import json
+
+# function that retry and abort on attempts to do something
+def retry_abort(func: function, max_retries: int = 3):
+    def retry_abort_wrapper(*args, **kwargs):
+        function_name = func.__name__
+        print(f"Initializing the function: {function_name}")
+        for attempt in range(1, max_retries+1):
+            try:
+                
+                return func(*args, **kwargs)
+            except Exception as e:
+                print(e)
+                if attempt == max_retries:
+                    # abort
+                    raise e
+                time.sleep(5)
+    return retry_abort_wrapper
 
 # get secret from secret manager service
 def get_secret():
@@ -42,23 +60,9 @@ def get_secret():
 
     return SECRET
 
-
-# function that retry and abort on attempts to do something
-#def retry_abort(
-#    func,
-#    params: dict,
-#    max_retries: int = 3,
-#    attempt: int = 1
-#    ):
-#    if attempt <= max_retries:
-#        attempt += 1
-#        func(attempt=attempt)
-#    else:
-#        pass # abort
-
-
 # function that queries in the RDS Database
-def query_db(query: str, attempt: int = 1):
+@retry_abort
+def query_db(query: str):
     """Function that queries in the RDS Database instance."""
 
     ENDPOINT = ""
@@ -81,24 +85,18 @@ def query_db(query: str, attempt: int = 1):
         DBUsername=USER,
         Region=REGION
         )
-
-    try:
-        conn =  mysql.connector.connect(
-            host=ENDPOINT,
-            user=USER,
-            passwd=token,
-            port=PORT,
-            database=DBNAME,
-            ssl_ca='SSLCERTIFICATE'
-            )
-        cur = conn.cursor()
-        cur.execute(f"""{query}""")
-        query_results = cur.fetchall()
-    except Exception as e:
-        print("Database connection failed due to {}".format(e))
-        #retry_abort(func=query_db(query=query), attempt=attempt)
-    else:
-        return query_results
+    conn =  mysql.connector.connect(
+        host=ENDPOINT,
+        user=USER,
+        passwd=token,
+        port=PORT,
+        database=DBNAME,
+        ssl_ca='SSLCERTIFICATE'
+        )
+    cur = conn.cursor()
+    cur.execute(query)
+    query_results = cur.fetchall()
+    return query_results
 
 
 # function that requests in the nearby search
@@ -107,8 +105,7 @@ def nearby_search(
     lon: str,
     types: str = 'restaurant|bar|meal_delivery|meal_takeaway|cafe',
     radius: str = '400',
-    response_format: str = 'json',
-    #attempt: int = 1
+    response_format: str = 'json'
     ):
     """Function that makes the requests for the Maps API - Nearby Search. 
     
@@ -145,14 +142,18 @@ def nearby_search(
         return response
 
 # lambda_handler function
-def lambda_handler(attempt):
+def lambda_handler():
     lat_lon = query_db(query="SELECT * FROM db.points_to_search LIMIT 1")
     response = nearby_search(
         lat=lat_lon['lat'],
         lon=lat_lon['lon']
         )
-
+    response_json = dict(json.loads(response.text))
     # pagination handler
-
+    if "next_page_token" in response_json:
+        # function to request with token
+        pass
+    else:
+        print("Sem token")
 
 lambda_handler()
