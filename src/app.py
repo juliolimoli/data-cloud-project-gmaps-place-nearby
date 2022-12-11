@@ -5,6 +5,7 @@ import boto3
 from botocore.exceptions import ClientError
 import os
 import time
+from datetime import datetime
 import json
 
 # function that retry and abort on attempts to do something
@@ -110,17 +111,18 @@ def nearby_search(
     """Function that makes the requests for the Maps API - Nearby Search. 
     
     Parameters:
-    lat (str): Latitude value.
-    lon (str): Longitude value.
-    types (str): Restricts the results to places matching the specified type. 
-        Access to see more: 
-        URL
-    radius (str): Defines the distance (in meters) within which to return place
-        results.
-    response_format: Response format (json or xml).
+        lat (str): Latitude value.
+        lon (str): Longitude value.
+        types (str): Restricts the results to places matching the specified\
+            type. 
+            Access to see more: 
+            URL
+        radius (str): Defines the distance (in meters) within which to return\
+            place results.
+        response_format: Response format (json or xml).
 
     Returns:
-    JSON: Response of the request
+        Response of the request
     """
     API_KEY = get_secret()
     endpoint = 'https://maps.googleapis.com/maps/api/place/nearbysearch/'
@@ -141,19 +143,131 @@ def nearby_search(
             #retry_abort(func=lambda_handler())
         return response
 
+# function that requests with token
+def token_search(
+    response_json: str,
+    bucket_name: str,
+    prefix_name: str,
+    response_format: str = 'json'
+    ):
+    """Function that makes the requests for the Maps API - Nearby Search 
+    Additional Results with Token. 
+    
+    Parameters:
+        token (str): Token provided in previous Nearby Search request.
+        response_format: Response format (json | xml).
+
+    Returns:
+        Response of the request
+    """
+    for _ in range(1,3):
+        if "next_page_token" in response_json:
+            token = response_json["next_page_token"]
+            API_KEY = get_secret()
+            endpoint = "https://maps.googleapis.com/maps/api/place/\
+nearbysearch/"
+            url_loc = f"{endpoint}{response_format}?pagetoken={token}\
+&key={API_KEY}"
+
+            # request the API
+            payload={}
+            headers = {}
+
+            try:
+                response = req.request(
+                    "GET",
+                    url_loc,
+                    headers=headers,
+                    data=payload
+                    )
+            except Exception as e:
+                raise e
+            else:
+                t = datetime.now()
+                timestamp = datetime.strftime(t, "%Y%m%d%H%M%S%f")
+                
+                key = f"{prefix_name}{timestamp}.json"
+
+                s3_put_object(
+                    bucket_name=bucket_name,
+                    file_key=key,
+                    file=response_json
+                    )
+
+        else:
+            print("Sem token")
+            break
+
+# function that saves data in S3 bucket
+@retry_abort
+def s3_put_object(
+    bucket_name: str, 
+    file_key: str,
+    file: object,
+    extension: str = 'json'
+    ):
+    """Upload a file to an S3 bucket
+
+    Parameters:
+        file: File to upload
+        bucket: Bucket to upload to
+        object_name: S3 object name. If not specified then file_name is used
+    Return:
+        True if file was uploaded, else False
+    """
+    # File to upload
+    upload_byte_stream = bytes(file.encode("UTF-8"))
+
+    # Upload the file
+    s3_client = boto3.client("s3")
+    try:
+        response = s3_client.put_object(
+            Bucket=bucket_name, 
+            Key=file_key, 
+            Body=upload_byte_stream
+            )
+    except ClientError as e:
+        print(e)
+        return False
+    return True
+
 # lambda_handler function
 def lambda_handler():
-    lat_lon = query_db(query="SELECT * FROM db.points_to_search LIMIT 1")
-    response = nearby_search(
-        lat=lat_lon['lat'],
-        lon=lat_lon['lon']
+    loc_to_search_query = query_db(
+        query="""SELECT 
+            * FROM 
+        db.points_to_search 
+            LIMIT 1
+        """
         )
-    response_json = dict(json.loads(response.text))
+    country = loc_to_search_query["country"]
+    state = loc_to_search_query["state"]
+    city = loc_to_search_query["city"]
+    response = nearby_search(
+        lat=loc_to_search_query["lat"],
+        lon=loc_to_search_query["lon"]
+        )
+    response_json = json.loads(response.text)
+
+    # Upload to S3
+    bucket = "SoR"
+    prefix = f"gmaps/nearby/{country}/{state}/{city}/"
+
+    t = datetime.now()
+    timestamp = datetime.strftime(t, "%Y%m%d%H%M%S%f")
+    
+    key = f"{prefix}{timestamp}.json"
+
+    s3_put_object(
+        bucket_name=bucket,
+        file_key=key,
+        file=response_json
+        )
     # pagination handler
-    if "next_page_token" in response_json:
-        # function to request with token
-        pass
-    else:
-        print("Sem token")
+    token_search(
+        response_json=response_json, 
+        bucket_name=bucket,
+        prefix_name=prefix
+        )
 
 lambda_handler()
