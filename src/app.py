@@ -203,8 +203,7 @@ nearbysearch/"
 def s3_put_object(
     bucket_name: str, 
     file_key: str,
-    file: object,
-    extension: str = 'json'
+    file: object
     ):
     """Upload a file to an S3 bucket
 
@@ -233,16 +232,22 @@ def s3_put_object(
 
 # lambda_handler function
 def lambda_handler():
-    loc_to_search_query = query_db(
-        query="""SELECT 
-            * FROM 
-        db.points_to_search 
-            LIMIT 1
+    query = """SELECT 
+            * 
+        FROM 
+            db.points_to_search 
+        LIMIT 1;
         """
-        )
+    # querying db to get location
+    loc_to_search_query = query_db(query=query)
+
+    # variables returned
+    loc_search_id = loc_to_search_query["loc_search_id"]
     country = loc_to_search_query["country"]
     state = loc_to_search_query["state"]
     city = loc_to_search_query["city"]
+
+    # requesting the Nearby Places API
     response = nearby_search(
         lat=loc_to_search_query["lat"],
         lon=loc_to_search_query["lon"]
@@ -250,24 +255,32 @@ def lambda_handler():
     response_json = json.loads(response.text)
 
     # Upload to S3
-    bucket = "SoR"
-    prefix = f"gmaps/nearby/{country}/{state}/{city}/"
-
     t = datetime.now()
     timestamp = datetime.strftime(t, "%Y%m%d%H%M%S%f")
-    
-    key = f"{prefix}{timestamp}.json"
+    bucket = "SoR"
+    prefix = f"gmaps/nearby/{country}/{state}/{city}/"
+    file_name = f"{timestamp}.json"
+    key = f"{prefix}{file_name}"
 
     s3_put_object(
         bucket_name=bucket,
         file_key=key,
         file=response_json
         )
+
     # pagination handler
     token_search(
         response_json=response_json, 
         bucket_name=bucket,
         prefix_name=prefix
         )
+    
+    # Delete row
+    query = f"""DELETE FROM
+                db.points_to_search
+            WHERE loc_search_id = {loc_search_id};
+    """
+
+    # Insert into db - snapshot
 
 lambda_handler()
