@@ -15,7 +15,6 @@ def retry_abort(func: function, max_retries: int = 3):
         print(f"Initializing the function: {function_name}")
         for attempt in range(1, max_retries+1):
             try:
-                
                 return func(*args, **kwargs)
             except Exception as e:
                 print(e)
@@ -101,9 +100,11 @@ def query_db(query: str):
 
 
 # function that requests in the nearby search
+@retry_abort
 def nearby_search(
-    lat: str,
-    lon: str,
+    lat: str = None,
+    lon: str = None,
+    next_page_token: str = None,
     types: str = 'restaurant|bar|meal_delivery|meal_takeaway|cafe',
     radius: str = '400',
     response_format: str = 'json'
@@ -126,77 +127,21 @@ def nearby_search(
     """
     API_KEY = get_secret()
     endpoint = 'https://maps.googleapis.com/maps/api/place/nearbysearch/'
-    url_loc = f"{endpoint}{response_format}?location={lat}%2c{lon}&radius=\
-{radius}&type={types}&key={API_KEY}"
-
-    # request the API
     payload={}
     headers = {}
-
-    try:
+    #####
+    if next_page_token is None:
+        # request the API
+        url_loc = f"{endpoint}{response_format}?location={lat}%2c{lon}&radius=\
+{radius}&type={types}&key={API_KEY}"
         response = req.request("GET", url_loc, headers=headers, data=payload)
-    except Exception as e:
-        raise e
-    else:
-        # return OK
-        #if response.status_code != 200:
-            #retry_abort(func=lambda_handler())
         return response
-
-# function that requests with token
-def token_search(
-    response_json: str,
-    bucket_name: str,
-    prefix_name: str,
-    response_format: str = 'json'
-    ):
-    """Function that makes the requests for the Maps API - Nearby Search 
-    Additional Results with Token. 
-    
-    Parameters:
-        token (str): Token provided in previous Nearby Search request.
-        response_format: Response format (json | xml).
-
-    Returns:
-        Response of the request
-    """
-    for _ in range(1,3):
-        if "next_page_token" in response_json:
-            token = response_json["next_page_token"]
-            API_KEY = get_secret()
-            endpoint = "https://maps.googleapis.com/maps/api/place/\
-nearbysearch/"
-            url_loc = f"{endpoint}{response_format}?pagetoken={token}\
+    else:
+        token = next_page_token
+        url_loc = f"{endpoint}{response_format}?pagetoken={token}\
 &key={API_KEY}"
-
-            # request the API
-            payload={}
-            headers = {}
-
-            try:
-                response = req.request(
-                    "GET",
-                    url_loc,
-                    headers=headers,
-                    data=payload
-                    )
-            except Exception as e:
-                raise e
-            else:
-                t = datetime.now()
-                timestamp = datetime.strftime(t, "%Y%m%d%H%M%S%f")
-                
-                key = f"{prefix_name}{timestamp}.json"
-
-                s3_put_object(
-                    bucket_name=bucket_name,
-                    file_key=key,
-                    file=response_json
-                    )
-
-        else:
-            print("Sem token")
-            break
+        response = req.request("GET", url_loc, headers=headers, data=payload)
+        return response
 
 # function that saves data in S3 bucket
 @retry_abort
@@ -243,6 +188,7 @@ def lambda_handler():
 
     # variables returned
     loc_search_id = loc_to_search_query["loc_search_id"]
+    loc_id = loc_to_search_query["loc_id"]
     country = loc_to_search_query["country"]
     state = loc_to_search_query["state"]
     city = loc_to_search_query["city"]
@@ -253,6 +199,7 @@ def lambda_handler():
         lon=loc_to_search_query["lon"]
         )
     response_json = json.loads(response.text)
+    res_status_code = response.status_code
 
     # Upload to S3
     t = datetime.now()
@@ -267,20 +214,78 @@ def lambda_handler():
         file_key=key,
         file=response_json
         )
+    
+    # Insert into db - snapshot
+    query_insert_snapshot = f"""INSERT INTO 
+                        searches_snapshots
+                        (
+                        loc_search_id,
+                        loc_id,
+                        status_code,
+                        search_timestamp,
+                        pagination
+                        )
+                    VALUES
+                        (
+                        {loc_search_id},
+                        {loc_id}, 
+                        {res_status_code},
+                        NOW(),
+                        0
+                        );
+    """
 
+    query_db(query=query_insert_snapshot)
+    
     # pagination handler
-    token_search(
-        response_json=response_json, 
-        bucket_name=bucket,
-        prefix_name=prefix
-        )
+    for page in range(1,3):
+        if "next_page_token" in response_json:
+            token = response_json["next_page_token"]
+            response = nearby_search(next_page_token=token)
+            response_json = json.loads(response.text)
+            res_status_code = response.status_code
+
+            # Upload to S3
+            t = datetime.now()
+            timestamp = datetime.strftime(t, "%Y%m%d%H%M%S%f")
+            file_name = f"{timestamp}.json"
+            key = f"{prefix}{file_name}"
+
+            s3_put_object(
+                bucket_name=bucket,
+                file_key=key,
+                file=response_json
+                )
+
+            # Insert into db - snapshot
+            query_insert_snapshot = f"""INSERT INTO 
+                                searches_snapshots
+                                (
+                                loc_search_id,
+                                loc_id,
+                                status_code,
+                                search_timestamp,
+                                pagination
+                                )
+                            VALUES
+                                (
+                                {loc_search_id},
+                                {loc_id}, 
+                                {res_status_code},
+                                NOW(),
+                                {page}
+                                );
+            """
+            query_db(query=query_insert_snapshot)
+        else:
+            print("Sem token")
+            break
     
     # Delete row
-    query = f"""DELETE FROM
+    query_delete = f"""DELETE FROM
                 db.points_to_search
             WHERE loc_search_id = {loc_search_id};
     """
-
-    # Insert into db - snapshot
+    query_db(query=query_delete)
 
 lambda_handler()
