@@ -176,31 +176,16 @@ def s3_put_object(
     return True
 
 # lambda_handler function
-def lambda_handler():
-    query = """SELECT 
-            * 
-        FROM 
-            db.points_to_search 
-        LIMIT 1;
-        """
-    # querying db to get location
-    loc_to_search_query = query_db(query=query)
-
-    # variables returned
-    loc_search_id = loc_to_search_query["loc_search_id"]
-    loc_id = loc_to_search_query["loc_id"]
-    country = loc_to_search_query["country"]
-    state = loc_to_search_query["state"]
-    city = loc_to_search_query["city"]
+def lambda_handler(event, context):
 
     # requesting the Nearby Places API
     response = nearby_search(
-        lat=loc_to_search_query["lat"],
-        lon=loc_to_search_query["lon"]
+        lat=event["lat"],
+        lon=event["lon"]
         )
     response_json = json.loads(response.text)
     res_status_code = response.status_code
-
+    
     # Upload to S3
     t = datetime.now()
     timestamp = datetime.strftime(t, "%Y%m%d%H%M%S%f")
