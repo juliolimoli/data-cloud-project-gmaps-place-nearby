@@ -272,5 +272,3 @@ def lambda_handler(event, context):
             WHERE loc_search_id = {loc_search_id};
     """
     query_db(query=query_delete)
-
-lambda_handler()
