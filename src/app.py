@@ -3,7 +3,7 @@ import requests as req
 import boto3
 from botocore.exceptions import ClientError
 import os
-import time
+from time import sleep
 from datetime import datetime
 import json
 
@@ -43,7 +43,7 @@ def nearby_search(
         response = req.request("GET", url_loc, headers=headers, data=payload)
         return response
     else:
-        time.sleep(4)
+        sleep(4)
         url_loc = f"{endpoint}{response_format}?pagetoken={next_page_token}\
 &key={API_KEY}"
         response = req.request("GET", url_loc, headers=headers, data=payload)
@@ -82,8 +82,8 @@ def s3_put_object(
 
 def send_to_details_lambda(results, context):
     region = "sa-east-1"
-    acc_id = "820949372807"
-    event_bus_name = f"arn:aws:events:{region}:{acc_id}:event-bus/default"
+    ACC_ID = os.environ["AWS_ACCOUNT_ID"]
+    event_bus_name = f"arn:aws:events:{region}:{ACC_ID}:event-bus/default"
     print("sending details")
     # Get all Place Id's
     places_ids = [place['place_id'] for place in results]
