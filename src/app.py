@@ -6,6 +6,7 @@ import os
 from time import sleep
 from datetime import datetime
 import json
+import gzip
 
 def nearby_search(
     lat: str = None,
@@ -49,32 +50,28 @@ def nearby_search(
         response = req.request("GET", url_loc, headers=headers, data=payload)
         return response
 
-# function that saves data in S3 bucket
-def s3_put_object(
+def s3_upload_file(
     bucket_name: str, 
     file_key: str,
-    file: object
+    file_path: str
     ):
     """Upload a file to an S3 bucket
 
     Parameters:
-        file: File to upload
-        bucket: Bucket to upload to
-        object_name: S3 object name. If not specified then file_name is used
+        bucket_name: Bucket to upload to
+        file_key: File key in the S3 bucket that the gz will be uploaded
+        file_path: temporary file in tmp/ directory
     Return:
         True if file was uploaded, else False
     """
-    # File to upload
-    #json.dumps(file, ensure_ascii=False).encode('utf8')
     # Upload the file
     s3_client = boto3.client("s3")
     try:
-        response = s3_client.put_object(
-            Bucket=bucket_name, 
-            Key=file_key, 
-            Body=file,
-            ContentType="text/plain;charset=utf-8"
-            )
+        response = s3_client.upload_file(
+            Filename=file_path,
+            Bucket=bucket_name,
+            Key=file_key
+        )
     except ClientError as e:
         print(e)
         return False
@@ -107,6 +104,11 @@ def send_to_details_lambda(results, context):
     response = event_bridge_client.put_events(**put_events_params)
     print(response)
 
+def gzip_file(input_file, output_file):
+    with open(input_file, 'rb') as f_in:
+        with gzip.open(output_file, 'wb') as f_out:
+            f_out.writelines(f_in)
+
 # lambda_handler function
 def lambda_handler(event, context):
     print(event)
@@ -121,22 +123,34 @@ def lambda_handler(event, context):
         radius=radius
         )
     response_dict = json.loads(response.text)
-    response_encoded = json.dumps(
-        response_dict, 
-        ensure_ascii=False
-        ).encode('utf8')  
+
     # Upload to S3
     timestamp = datetime.now().strftime("%Y%m%d%H%M%S%f")
     coordinate_string = str(coordinate[0])+"_"+str(coordinate[1])
     bucket = "dcpgm-sor"
     prefix = "gmaps/nearby/"
-    file_name = f"{coordinate_string}_{timestamp}_1.json"
-    key = f"{prefix}{file_name}"
+    file_name = f"{coordinate_string}_{timestamp}_1"
+    key = f"{prefix}{file_name}.gz"
 
-    s3_put_object(
+    # Create a temporary file in the /tmp directory
+    tmp_file_path_json = f'/tmp/{file_name}.json'
+    tmp_file_path_gz = f'/tmp/{file_name}.gz'
+    with open(tmp_file_path_json, 'w') as f:
+        json.dump(
+            obj=response_dict,
+            fp=f,
+            ensure_ascii=False
+            )
+
+    gzip_file(
+        input_file=tmp_file_path_json,
+        output_file=tmp_file_path_gz
+        )
+
+    s3_upload_file(
         bucket_name=bucket,
         file_key=key,
-        file=response_encoded
+        file_path=tmp_file_path_gz
         )
     
     send_to_details_lambda(response_dict['results'], context)
@@ -148,18 +162,30 @@ def lambda_handler(event, context):
             token = response_dict["next_page_token"]
             response = nearby_search(next_page_token=token)
             response_dict = json.loads(response.text)
-            response_encoded = json.dumps(
-                response_dict, 
-                ensure_ascii=False
-                ).encode('utf8')
-            # Upload to S3
-            file_name = f"{coordinate_string}_{timestamp}_{page}.json"
-            key = f"{prefix}{file_name}"
 
-            s3_put_object(
+            # Upload to S3
+            file_name = f"{coordinate_string}_{timestamp}_{page}"
+            key = f"{prefix}{file_name}.gz"
+
+            # Create a temporary file in the /tmp directory
+            tmp_file_path_json = f'/tmp/{file_name}.json'
+            tmp_file_path_gz = f'/tmp/{file_name}.gz'
+            with open(tmp_file_path_json, 'w') as f:
+                json.dump(
+                    obj=response_dict,
+                    fp=f,
+                    ensure_ascii=False
+                    )
+
+            gzip_file(
+                input_file=tmp_file_path_json,
+                output_file=tmp_file_path_gz
+                )
+
+            s3_upload_file(
                 bucket_name=bucket,
                 file_key=key,
-                file=response_encoded
+                file_path=tmp_file_path_gz
                 )
 
             # Create details lambda event in EventBridge
