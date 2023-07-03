@@ -126,9 +126,10 @@ def lambda_handler(event, context):
 
     # Upload to S3
     timestamp = datetime.now().strftime("%Y%m%d%H%M%S%f")
+    year_month_day = timestamp[0:8]
     coordinate_string = str(coordinate[0])+"_"+str(coordinate[1])
     bucket = "dcpgm-sor"
-    prefix = "gmaps/nearby/"
+    prefix = f"gmaps/nearby/{year_month_day}"
     file_name = f"{coordinate_string}_{timestamp}_1"
     key = f"{prefix}{file_name}.gz"
 
