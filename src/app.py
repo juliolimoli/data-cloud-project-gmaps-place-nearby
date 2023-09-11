@@ -109,10 +109,22 @@ def gzip_file(input_file, output_file):
         with gzip.open(output_file, 'wb') as f_out:
             f_out.writelines(f_in)
 
+def delete_schedule_rule(rule_name):
+    try:
+        event_bridge_client = boto3.client('scheduler')
+        event_bridge_client.delete_schedule(
+            Name=rule_name
+        )
+        print(f"Rule {rule_name} deleted succesfully.")
+    except Exception as e:
+        print(f"Couldn't delete rule: {rule_name}.\n{e}")
+
+
 # lambda_handler function
 def lambda_handler(event, context):
     print(event)
     # Define the initial variables
+    schedule_rule_name = event.get("rule_name")
     coordinate = (event["coordinate"][0], event["coordinate"][1])
     radius = event["radius"]
 
@@ -195,3 +207,7 @@ def lambda_handler(event, context):
         else:
             print("Sem token")
             break
+    print(f"Deleting schedule rule: {schedule_rule_name}.")
+    if schedule_rule_name:
+        delete_schedule_rule(rule_name=schedule_rule_name)
+    
